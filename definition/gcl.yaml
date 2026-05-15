@@ -1,0 +1,279 @@
+---
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: Extension
+metadata:
+  labels:
+    title: Data Masking
+    description: |
+      Bidirectional, format-preserving masking and unmasking of sensitive
+      data. Masks request bodies on the way out to upstream (LLM, third-party
+      API, analytics, BPO endpoint, lower environment) and unmasks the
+      response on the way back, so the calling client still sees real data.
+
+      Supports a built-in catalog of ~100 named patterns (government IDs,
+      financial, network, secrets, dates, geographic, currency, hashes,
+      identifiers, files), user-supplied custom regex, and static value
+      lists (compiled to a single Aho-Corasick automaton so thousands of
+      entries scan in O(n) per request).
+
+      Format-preserving masking keeps shape: "Amir Khan" -> "Kosn Angg",
+      "123-45-6789" -> "482-91-3047". The mapping lives only on the
+      filter struct for the duration of the request and is destroyed when
+      the response phase finishes.
+    category: Security
+    metadata/interfaceScope: api,resource
+    metadata/capabilities/injectionPoint: inbound
+spec:
+  extends:
+    - name: extension-definition
+      namespace: default
+  properties:
+    maskRequestBody:
+      type: boolean
+      default: true
+      description: |
+        Apply masking to the outbound request body before it reaches the
+        upstream. When false, the request body is forwarded unchanged and
+        no vault is built (so the response phase has nothing to unmask
+        either).
+    unmaskResponseBody:
+      type: boolean
+      default: true
+      description: |
+        Reverse the masking on the inbound response body. Set to false for
+        "redact outbound, never restore" flows like lower-environment data
+        sharing or BPO offshoring, where the client should see the masked
+        form too.
+    contentTypeMode:
+      type: string
+      enum:
+        - auto
+        - json
+        - text
+      default: auto
+      description: |
+        `auto` parses JSON when the Content-Type header indicates JSON,
+        falls back to plaintext otherwise. `json` forces JSON-aware parsing
+        and falls back to plaintext only on parse error. `text` always
+        runs masking on the raw bytes (faster, but can corrupt JSON if a
+        masked value collides with a key name).
+    maxBodySizeBytes:
+      type: integer
+      minimum: 1024
+      maximum: 52428800
+      default: 5242880
+      description: |
+        Bodies larger than this (in bytes) are passed through unmodified
+        to avoid memory/CPU spikes. A `data-masking: body exceeds
+        maxBodySizeBytes; passing through` warning is logged so this is
+        observable. Default 5 MB; max 50 MB.
+    maxVaultEntries:
+      type: integer
+      minimum: 100
+      maximum: 1000000
+      default: 100000
+      description: |
+        Cap on the number of distinct (mask, original) pairs a single
+        request may produce. Above the cap, additional matches in the
+        request body are passed through unmasked (with a warning). Bounds
+        the worst-case memory of a single request. Default 100,000.
+    maskingRules:
+      type: array
+      default: []
+      description: |
+        One entry per masking rule. Each rule has a friendly `name`, a
+        `type` (builtin / customRegex / static), and the type-specific
+        fields. Rules are evaluated in the order they are listed; the
+        first match wins for any given byte span.
+      items:
+        type: object
+        required:
+          - name
+          - type
+        properties:
+          name:
+            type: string
+            description: |
+              Friendly label for this rule (e.g. "Customer names",
+              "DE social-security numbers"). Surfaces in masking-related
+              log lines so operators can tell which rule fired.
+          type:
+            type: string
+            enum:
+              - builtin
+              - customRegex
+              - static
+            description: |
+              `builtin`: pick a named pattern from the catalog dropdown.
+              `customRegex`: provide your own regex string.
+              `static`: provide a list of literal values to mask.
+          builtinPattern:
+            type: string
+            default: ""
+            enum:
+              - ""
+              - "Contact/Email"
+              - "Contact/PhoneGeneric"
+              - "Crypto/Btc"
+              - "Crypto/EthereumAddress"
+              - "Currency/Eur"
+              - "Currency/Gbp"
+              - "Currency/Iso4217Code"
+              - "Currency/Usd"
+              - "DateTime/EuDate"
+              - "DateTime/Iso8601Date"
+              - "DateTime/Iso8601DateTime"
+              - "DateTime/Rfc2822"
+              - "DateTime/Time24h"
+              - "DateTime/UnixMillis"
+              - "DateTime/UnixSeconds"
+              - "DateTime/UsDate"
+              - "Financial/CreditCard"
+              - "Financial/Cusip"
+              - "Financial/Iban"
+              - "Financial/Isin"
+              - "Financial/SwiftBic"
+              - "Financial/UsAbaRouting"
+              - "Geographic/CanadianPostal"
+              - "Geographic/DutchPostcode"
+              - "Geographic/FrenchPostcode"
+              - "Geographic/GermanPlz"
+              - "Geographic/Iso3166Alpha2"
+              - "Geographic/Iso3166Alpha3"
+              - "Geographic/ItalianCap"
+              - "Geographic/LatLng"
+              - "Geographic/Mgrs"
+              - "Geographic/PlusCode"
+              - "Geographic/UkPostcode"
+              - "Geographic/UsZip"
+              - "Geographic/What3Words"
+              - "GovernmentId/AustralianMedicare"
+              - "GovernmentId/AustralianTfn"
+              - "GovernmentId/AustrianSvnr"
+              - "GovernmentId/BrazilianCnpj"
+              - "GovernmentId/BrazilianCpf"
+              - "GovernmentId/CanadianSin"
+              - "GovernmentId/DutchBsn"
+              - "GovernmentId/FrenchInsee"
+              - "GovernmentId/GermanSvnr"
+              - "GovernmentId/IndianAadhaar"
+              - "GovernmentId/IndianPan"
+              - "GovernmentId/ItalianCodiceFiscale"
+              - "GovernmentId/JapaneseMyNumber"
+              - "GovernmentId/PolishPesel"
+              - "GovernmentId/SouthKoreanRrn"
+              - "GovernmentId/SpanishDniNie"
+              - "GovernmentId/SwissAhv"
+              - "GovernmentId/UkNino"
+              - "GovernmentId/UsSsn"
+              - "Hash/Base64Generic"
+              - "Hash/Bcrypt"
+              - "Hash/Md5"
+              - "Hash/Sha1"
+              - "Hash/Sha256"
+              - "Hash/Sha512"
+              - "Identifier/DiscordUserId"
+              - "Identifier/MongoObjectId"
+              - "Identifier/NanoId"
+              - "Identifier/Snowflake"
+              - "Identifier/SpotifyTrackId"
+              - "Identifier/TwitterStatusId"
+              - "Identifier/Ulid"
+              - "Identifier/Uuid"
+              - "Identifier/YouTubeVideoId"
+              - "Media/ColorHex"
+              - "Media/ColorRgb"
+              - "Media/FileExtension"
+              - "Media/MimeType"
+              - "Media/UnixPath"
+              - "Media/WindowsPath"
+              - "Misc/Icd10Code"
+              - "Misc/UsLicensePlate"
+              - "Misc/UsVin"
+              - "Network/Domain"
+              - "Network/Ipv4"
+              - "Network/Ipv6"
+              - "Network/Mac"
+              - "Network/Url"
+              - "Number/Binary"
+              - "Number/Hex"
+              - "Number/Percentage"
+              - "Number/Scientific"
+              - "Product/ArxivId"
+              - "Product/Asin"
+              - "Product/Doi"
+              - "Product/EanUpc"
+              - "Product/Isbn10"
+              - "Product/Isbn13"
+              - "Product/Orcid"
+              - "Product/PubmedId"
+              - "Secrets/AwsAccessKeyId"
+              - "Secrets/AwsSecretKey"
+              - "Secrets/GitHubPatClassic"
+              - "Secrets/Jwt"
+              - "Secrets/PrivateKeyHeader"
+              - "Secrets/SlackToken"
+              - "Versioning/GitSha256"
+              - "Versioning/GitShaFull"
+              - "Versioning/GitShaShort"
+              - "Versioning/SemVer"
+            description: |
+              Only meaningful when `type=builtin`. Categorized as
+              `<Category>/<PatternName>`. Type a category prefix in the
+              dropdown to narrow the list. Leave empty for non-builtin
+              rule types.
+          customRegex:
+            type: string
+            default: ""
+            description: |
+              Only meaningful when `type=customRegex`. Standard Rust regex
+              syntax (`regex` crate). The whole match is masked. Use
+              anchors / word boundaries (`\b`) to avoid greedy matches
+              across token boundaries. The regex is compiled once at
+              policy load; bad regex fails policy load with a clear error
+              instead of failing per-request.
+          dataType:
+            type: string
+            enum:
+              - text
+              - name
+              - email
+              - number
+              - alphanumeric
+              - identifier
+            default: text
+            description: |
+              Hints the format-preserving masker how to choose replacement
+              characters. `email` keeps `@`, `.`, `-`, `_` intact;
+              `number` keeps non-digits unchanged ("EUR 47,200" ->
+              "EUR 38,815"); `identifier` keeps `-` and `/` intact;
+              `name`, `text`, `alphanumeric` are aliases for the default
+              behaviour (letter -> letter with case preserved, digit ->
+              digit, other punctuation pass-through).
+          values:
+            type: array
+            default: []
+            items:
+              type: string
+            description: |
+              Only meaningful when `type=static`. Literal values to mask.
+              Numeric values must be passed as strings ("2029" not 2029).
+              Compiled into a single Aho-Corasick automaton at policy
+              load, so thousands of entries scan in O(n + matches) per
+              request.
+          scope:
+            type: string
+            enum:
+              - request
+              - response
+              - both
+            default: both
+            description: |
+              `both` masks on the request and unmasks on the response (the
+              standard round-trip). `request` masks on the way out but
+              does NOT enroll the value into the unmask vault for the
+              response phase, so the client also sees the masked form.
+              `response` is included for symmetry: it scans the response
+              body for matches and masks them on the way to the client
+              (no request-phase work). Most rules want `both`.
+  required: []

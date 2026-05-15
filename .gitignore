@@ -1,0 +1,70 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+.idea-definition.md
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# electron desktop build outputs
+/dist-electron/
+/release/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
+/agentforce-api-to-a2a/policy-config.json
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+#supabase
+supabase/.branches/
+supabase/.temp/
+supabase/backup/
+
+# Local Supabase development
+.local/
+.env.supabase
+.supabase-projects.json
+
+# Production data dumps (NEVER commit!)
+*-data.sql
+*-prod-data.sql
+*-production-dump.sql
+prod-dump-*.sql
+scripts/seed-production.sql
+
+# Rust / WASM build outputs
+/target/
+/Cargo.lock
+
+# Local policy config (may contain secrets)
+/policy-config.json
+
+# Generated policy assets
+/definition/target/
+/playground/config/custom-policies/*.yaml
+/playground/config/custom-policies/*.wasm
+
+# Local Flex Gateway registration credential
+/playground/config/registration.yaml

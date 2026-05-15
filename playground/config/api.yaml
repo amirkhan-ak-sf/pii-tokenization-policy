@@ -1,0 +1,65 @@
+---
+apiVersion: gateway.mulesoft.com/v1alpha1
+kind: ApiInstance
+metadata:
+  name: ingress-http
+spec:
+  address: http://0.0.0.0:8081
+  services:
+    upstream:
+      # httpbin echoes the request body back inside its JSON response, so
+      # we can observe mask -> upstream -> unmask round-trips end to end.
+      address: http://backend
+      routes:
+        - config:
+            destinationPath: /anything
+  policies:
+    - policyRef:
+        name: data-masking-policy-v1-0-impl  # overridden by `make run`
+        namespace: default
+      config:
+        maskRequestBody: true
+        unmaskResponseBody: true
+        contentTypeMode: auto
+        maxBodySizeBytes: 5242880
+        maxVaultEntries: 100000
+        maskingRules:
+          - name: emails
+            type: builtin
+            builtinPattern: Contact/Email
+            scope: both
+          - name: us-ssn
+            type: builtin
+            builtinPattern: GovernmentId/UsSsn
+            dataType: number
+            scope: both
+          - name: de-svnr
+            type: builtin
+            builtinPattern: GovernmentId/GermanSvnr
+            scope: both
+          - name: ipv4
+            type: builtin
+            builtinPattern: Network/Ipv4
+            dataType: number
+            scope: both
+          - name: customer-names
+            type: static
+            dataType: name
+            values:
+              - Amir Khan
+              - Johan Koeppel
+              - Thomas Koeppner
+            scope: both
+          - name: internal-account-ids
+            type: static
+            dataType: number
+            values:
+              - "2029"
+              - "29183"
+              - "28282"
+              - "112"
+            scope: both
+          - name: contract-numbers
+            type: customRegex
+            customRegex: \bCN-\d{4}-[A-Z]{3}\b
+            scope: both

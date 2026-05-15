@@ -1,0 +1,19 @@
+version: "3.3"
+
+services:
+  local-flex:
+    image: mulesoft/flex-gateway:latest
+    platform: linux/amd64
+    environment:
+      LOG_LEVEL: debug
+      FLEX_LOG_LEVEL: 7
+    ports:
+      - 8081:8081
+    volumes:
+      - ./config:/usr/local/share/mulesoft/flex-gateway/conf.d/
+  backend:
+    # httpbin echoes the request body back as part of the JSON response,
+    # which is exactly what we need to verify the mask -> upstream -> unmask
+    # round trip without needing a real LLM or third-party service.
+    image: kennethreitz/httpbin
+    platform: linux/amd64
