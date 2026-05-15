@@ -89,7 +89,7 @@ spec:
         type: object
         required:
           - name
-          - type
+          - ruleType
         properties:
           name:
             type: string
@@ -97,7 +97,7 @@ spec:
               Friendly label for this rule (e.g. "Customer names",
               "DE social-security numbers"). Surfaces in masking-related
               log lines so operators can tell which rule fired.
-          type:
+          ruleType:
             type: string
             enum:
               - builtin
@@ -218,7 +218,7 @@ spec:
               - "Versioning/GitShaShort"
               - "Versioning/SemVer"
             description: |
-              Only meaningful when `type=builtin`. Categorized as
+              Only meaningful when `ruleType=builtin`. Categorized as
               `<Category>/<PatternName>`. Type a category prefix in the
               dropdown to narrow the list. Leave empty for non-builtin
               rule types.
@@ -226,7 +226,7 @@ spec:
             type: string
             default: ""
             description: |
-              Only meaningful when `type=customRegex`. Standard Rust regex
+              Only meaningful when `ruleType=customRegex`. Standard Rust regex
               syntax (`regex` crate). The whole match is masked. Use
               anchors / word boundaries (`\b`) to avoid greedy matches
               across token boundaries. The regex is compiled once at
@@ -256,7 +256,7 @@ spec:
             items:
               type: string
             description: |
-              Only meaningful when `type=static`. Literal values to mask.
+              Only meaningful when `ruleType=static`. Literal values to mask.
               Numeric values must be passed as strings ("2029" not 2029).
               Compiled into a single Aho-Corasick automaton at policy
               load, so thousands of entries scan in O(n + matches) per

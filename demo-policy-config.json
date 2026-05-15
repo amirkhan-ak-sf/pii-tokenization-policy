@@ -1,0 +1,30 @@
+{
+  "maskRequestBody": true,
+  "unmaskResponseBody": true,
+  "contentTypeMode": "auto",
+  "maxBodySizeBytes": 5242880,
+  "maxVaultEntries": 100000,
+  "maskingRules": [
+    {
+      "name": "us-ssn-builtin",
+      "ruleType": "builtin",
+      "builtinPattern": "GovernmentId/UsSsn",
+      "dataType": "number",
+      "scope": "both"
+    },
+    {
+      "name": "contract-numbers-customRegex",
+      "ruleType": "customRegex",
+      "customRegex": "\\bCN-\\d{4}-[A-Z]{3}\\b",
+      "dataType": "alphanumeric",
+      "scope": "both"
+    },
+    {
+      "name": "premier-customer-names-static",
+      "ruleType": "static",
+      "dataType": "name",
+      "values": ["Amir Khan", "Johan Koeppel", "Thomas Koeppner"],
+      "scope": "both"
+    }
+  ]
+}

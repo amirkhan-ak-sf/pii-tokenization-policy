@@ -22,7 +22,7 @@ pub enum ConfigError {
     BadMaxBodySize(i64),
     #[error("maxVaultEntries out of range [100, 1000000]: {0}")]
     BadMaxVaultEntries(i64),
-    #[error("rule '{0}': type must be one of: builtin, customRegex, static (got '{1}')")]
+    #[error("rule '{0}': ruleType must be one of: builtin, customRegex, static (got '{1}')")]
     BadRuleType(String, String),
     #[error("rule '{0}': scope must be one of: request, response, both (got '{1}')")]
     BadScope(String, String),
@@ -30,15 +30,15 @@ pub enum ConfigError {
     BadDataType(String, String),
     #[error("rule '{0}': builtinPattern '{1}' is not in the catalog")]
     UnknownBuiltin(String, String),
-    #[error("rule '{0}': type=builtin requires builtinPattern to be set")]
+    #[error("rule '{0}': ruleType=builtin requires builtinPattern to be set")]
     MissingBuiltin(String),
-    #[error("rule '{0}': type=customRegex requires customRegex to be set")]
+    #[error("rule '{0}': ruleType=customRegex requires customRegex to be set")]
     MissingCustomRegex(String),
     #[error("rule '{0}': customRegex failed to compile: {1}")]
     BadCustomRegex(String, String),
     #[error("rule '{0}': built-in pattern '{1}' failed to compile: {2}")]
     BadBuiltinRegex(String, String, String),
-    #[error("rule '{0}': type=static requires non-empty values")]
+    #[error("rule '{0}': ruleType=static requires non-empty values")]
     EmptyStaticValues(String),
     #[error("rule '{0}': static values automaton failed to build: {1}")]
     BadStaticAutomaton(String, String),
@@ -275,7 +275,7 @@ impl From<&crate::generated::config::Config> for RawConfig {
                 .iter()
                 .map(|r| RawRule {
                     name: r.name.clone(),
-                    rule_type: r.r#type.clone(),
+                    rule_type: r.rule_type.clone(),
                     builtin_pattern: r.builtin_pattern.clone(),
                     custom_regex: r.custom_regex.clone(),
                     data_type: r.data_type.clone(),

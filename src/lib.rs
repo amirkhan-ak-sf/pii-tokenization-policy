@@ -236,48 +236,49 @@ fn transform_response(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault, use_js
         .iter()
         .any(|r| matches!(r.scope(), config::Scope::Response));
 
-    if use_json {
-        // Try JSON-aware transformation first.
-        let mut value: Option<Vec<u8>> = None;
-        if needs_response_side_mask {
-            if let Ok(out) = json_walk::mask_json_response(body, cfg, vault) {
-                value = Some(out);
-            }
+    // Response-side masking (scope=response) needs JSON awareness so it
+    // doesn't mask object keys. Unmask, by contrast, must preserve the
+    // body's byte length exactly: the gateway forwards the upstream's
+    // Content-Length header, and any size drift (e.g. from re-serializing
+    // a pretty-printed upstream response into compact JSON) leaves the
+    // downstream client waiting for bytes that never arrive. Masks are
+    // format-preserving so a raw textual unmask is length-stable, and
+    // they're random ASCII that can't collide with JSON syntax.
+    let masked: Vec<u8> = if needs_response_side_mask {
+        if use_json {
+            json_walk::mask_json_response(body, cfg, vault).unwrap_or_else(|_| {
+                logger::debug!(
+                    "data-masking: response JSON parse failed; falling back to plaintext masking"
+                );
+                let text = std::str::from_utf8(body).unwrap_or("");
+                matcher::mask_response(text, cfg, vault).into_bytes()
+            })
+        } else {
+            let text = match std::str::from_utf8(body) {
+                Ok(s) => s,
+                Err(_) => {
+                    logger::debug!("data-masking: response body is not UTF-8; passing through");
+                    return body.to_vec();
+                }
+            };
+            matcher::mask_response(text, cfg, vault).into_bytes()
         }
-        let basis = value.as_deref().unwrap_or(body);
-        if needs_unmask {
-            if let Ok(out) = json_walk::unmask_json(basis, vault) {
-                return out;
-            }
-        }
-        if let Some(v) = value {
-            return v;
-        }
-        // JSON parse failed; fall through to plaintext.
-        logger::debug!(
-            "data-masking: response JSON parse failed; falling back to plaintext"
-        );
+    } else {
+        body.to_vec()
+    };
+
+    if !needs_unmask {
+        return masked;
     }
 
-    let text = match std::str::from_utf8(body) {
+    let text = match std::str::from_utf8(&masked) {
         Ok(s) => s,
         Err(_) => {
-            logger::debug!("data-masking: response body is not UTF-8; passing through");
-            return body.to_vec();
+            logger::debug!("data-masking: response body is not UTF-8; skipping unmask");
+            return masked;
         }
     };
-
-    let after_mask = if needs_response_side_mask {
-        matcher::mask_response(text, cfg, vault)
-    } else {
-        text.to_string()
-    };
-
-    if needs_unmask {
-        unmask::unmask_text(&after_mask, vault).into_bytes()
-    } else {
-        after_mask.into_bytes()
-    }
+    unmask::unmask_text(text, vault).into_bytes()
 }
 
 fn is_json_content_type(ct: Option<&str>) -> bool {

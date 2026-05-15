@@ -76,7 +76,7 @@ fn ssn_round_trip_with_json_aware() {
         "maskingRules": [
             {
                 "name": "ssn",
-                "type": "builtin",
+                "ruleType": "builtin",
                 "builtinPattern": "GovernmentId/UsSsn",
                 "dataType": "number",
                 "scope": "both"
@@ -140,7 +140,7 @@ fn static_list_with_thousands_of_entries() {
         "maskingRules": [
             {
                 "name": "premier-customers",
-                "type": "static",
+                "ruleType": "static",
                 "dataType": "name",
                 "values": names,
                 "scope": "both"
@@ -191,7 +191,7 @@ fn unmask_response_body_off_means_client_sees_mask() {
         "maskingRules": [
             {
                 "name": "ssn",
-                "type": "builtin",
+                "ruleType": "builtin",
                 "builtinPattern": "GovernmentId/UsSsn",
                 "dataType": "number",
                 "scope": "both"
@@ -215,6 +215,51 @@ fn unmask_response_body_off_means_client_sees_mask() {
     assert!(
         !client_text.contains("123-45-6789"),
         "client should also see the mask (unmaskResponseBody=false), got {client_text}"
+    );
+}
+
+#[test]
+fn unmask_preserves_response_body_length() {
+    // Regression: the response-phase unmask must not change the body's
+    // byte length. The gateway forwards the upstream's Content-Length
+    // header, and any size drift (e.g. parsing pretty-printed JSON and
+    // re-emitting compact JSON) leaves the downstream client waiting
+    // for bytes that never arrive.
+    let cfg = serde_json::json!({
+        "maskRequestBody": true,
+        "unmaskResponseBody": true,
+        "contentTypeMode": "auto",
+        "maskingRules": [
+            {
+                "name": "ssn",
+                "ruleType": "builtin",
+                "builtinPattern": "GovernmentId/UsSsn",
+                "dataType": "number",
+                "scope": "both"
+            }
+        ]
+    });
+
+    let (mut tester, _captured, response_body) = build_tester(cfg);
+
+    // Upstream returns a pretty-printed JSON body (the realistic shape
+    // for httpbin / many APIs). Whatever shows up at the client must have
+    // the exact same byte length.
+    let upstream_pretty_body = b"{\n  \"data\": \"masked-here\",\n  \"ok\": true\n}".to_vec();
+    *response_body.borrow_mut() = Some(upstream_pretty_body.clone());
+
+    let req = UnitHttpRequest::post()
+        .with_path("/anything")
+        .with_header("content-type", "application/json")
+        .with_body(br#"{"ssn":"123-45-6789"}"#.to_vec());
+
+    let resp = tester.request(req);
+    assert_eq!(
+        resp.body().len(),
+        upstream_pretty_body.len(),
+        "response body length must match upstream's body length exactly; got {} vs {}",
+        resp.body().len(),
+        upstream_pretty_body.len()
     );
 }
 
@@ -243,7 +288,7 @@ fn json_keys_are_preserved() {
         "maskingRules": [
             {
                 "name": "names",
-                "type": "static",
+                "ruleType": "static",
                 "dataType": "name",
                 "values": ["name", "Amir Khan"],
                 "scope": "both"

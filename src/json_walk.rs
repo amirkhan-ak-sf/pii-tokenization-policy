@@ -14,7 +14,6 @@ use serde_json::Value;
 use crate::config::PolicyConfig;
 use crate::mask::Vault;
 use crate::matcher::{mask_request, mask_response};
-use crate::unmask::unmask_text;
 
 pub fn mask_json_request(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault) -> Result<Vec<u8>, ()> {
     let mut value: Value = serde_json::from_slice(body).map_err(|_| ())?;
@@ -30,18 +29,6 @@ pub fn mask_json_response(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault) ->
     walk_mut(&mut value, &mut |s| {
         let masked = mask_response(s, cfg, vault);
         if masked == *s { None } else { Some(masked) }
-    });
-    serde_json::to_vec(&value).map_err(|_| ())
-}
-
-pub fn unmask_json(body: &[u8], vault: &Vault) -> Result<Vec<u8>, ()> {
-    if vault.is_empty() {
-        return Ok(body.to_vec());
-    }
-    let mut value: Value = serde_json::from_slice(body).map_err(|_| ())?;
-    walk_mut(&mut value, &mut |s| {
-        let restored = unmask_text(s, vault);
-        if restored == *s { None } else { Some(restored) }
     });
     serde_json::to_vec(&value).map_err(|_| ())
 }
@@ -186,14 +173,16 @@ mod tests {
 
     #[test]
     fn round_trip_through_unmask() {
+        // The response phase unmasks via raw textual replace (length-
+        // preserving — see lib::transform_response). Verify a JSON-aware
+        // mask followed by a textual unmask round-trips correctly.
         let cfg = cfg_static_names();
         let mut v = Vault::new(seed_from(b"jw4"), 1000);
         let req_body = br#"{"customer":{"name":"Amir Khan"},"summary":"Customer Amir Khan is at risk."}"#;
         let masked = mask_json_request(req_body, &cfg, &mut v).unwrap();
-        // Simulate the upstream echoing the masked body back.
-        let restored = unmask_json(&masked, &v).unwrap();
-        let s = std::str::from_utf8(&restored).unwrap();
-        assert!(s.contains("Amir Khan"));
+        let masked_text = std::str::from_utf8(&masked).unwrap();
+        let restored = crate::unmask::unmask_text(masked_text, &v);
+        assert!(restored.contains("Amir Khan"));
     }
 
     #[test]
