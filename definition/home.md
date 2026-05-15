@@ -68,7 +68,7 @@ Apply the policy with this configuration:
       "name": "premier-customer-names",
       "ruleType": "static",
       "dataType": "name",
-      "values": ["Amir Khan", "Johan Koeppel", "Thomas Koeppner"],
+      "values": ["Amir Khan", "Johan Koeppel", "Kevin Koeppner"],
       "scope": "both"
     },
     {
@@ -143,7 +143,7 @@ attacker watching multiple requests cannot correlate masked values.
       "name": "Premier customer names",
       "ruleType": "static",
       "dataType": "name",
-      "values": ["Amir Khan", "Johan Koeppel", "Thomas Koeppner"],
+      "values": ["Amir Khan", "Johan Koeppel", "Kevin Koeppner"],
       "scope": "both"
     },
     {
