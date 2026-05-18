@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use data_masking_policy::*;
+use pii_tokenization_policy::*;
 use pdk_unit::{Backend, UnitHttpMessage, UnitHttpRequest, UnitHttpResponse, UnitTestBuilder};
 
 struct EchoBackend {

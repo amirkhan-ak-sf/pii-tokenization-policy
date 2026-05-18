@@ -1,8 +1,8 @@
-# Data Masking Policy
+# PII Tokenization Policy
 
-Bidirectional, format-preserving masking of sensitive data inside HTTP
-request and response bodies — applied at the gateway, transparent to
-client and upstream alike.
+Bidirectional, format-preserving tokenization of sensitive data inside
+HTTP request and response bodies — applied at the gateway, transparent
+to client and upstream alike.
 
 ## What it does
 

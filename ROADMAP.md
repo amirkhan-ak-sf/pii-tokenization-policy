@@ -1,7 +1,7 @@
 # Roadmap
 
 Tracking known limitations and planned features for the
-data-masking-policy. Items are grouped by priority and reviewed at
+pii-tokenization-policy. Items are grouped by priority and reviewed at
 each release.
 
 ## P0 — known v1 limitations to address before GA

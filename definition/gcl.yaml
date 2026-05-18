@@ -3,12 +3,13 @@ apiVersion: gateway.mulesoft.com/v1alpha1
 kind: Extension
 metadata:
   labels:
-    title: Data Masking
+    title: PII Tokenization
     description: |
-      Bidirectional, format-preserving masking and unmasking of sensitive
-      data. Masks request bodies on the way out to upstream (LLM, third-party
-      API, analytics, BPO endpoint, lower environment) and unmasks the
-      response on the way back, so the calling client still sees real data.
+      Bidirectional, format-preserving tokenization of sensitive data.
+      Tokenizes request bodies on the way out to upstream (LLM,
+      third-party API, analytics, BPO endpoint, lower environment) and
+      restores the original values on the response on the way back, so
+      the calling client still sees real data.
 
       Supports a built-in catalog of ~100 named patterns (government IDs,
       financial, network, secrets, dates, geographic, currency, hashes,
@@ -64,7 +65,7 @@ spec:
       default: 5242880
       description: |
         Bodies larger than this (in bytes) are passed through unmodified
-        to avoid memory/CPU spikes. A `data-masking: body exceeds
+        to avoid memory/CPU spikes. A `pii-tokenization: body exceeds
         maxBodySizeBytes; passing through` warning is logged so this is
         observable. Default 5 MB; max 50 MB.
     maxVaultEntries:

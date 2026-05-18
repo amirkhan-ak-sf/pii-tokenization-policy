@@ -1,4 +1,4 @@
-//! Data masking policy entrypoint and filter wiring.
+//! PII tokenization policy entrypoint and filter wiring.
 //!
 //! Two-phase pipeline:
 //!
@@ -62,11 +62,11 @@ pub async fn configure(
 
     if cfg.rules.is_empty() {
         logger::info!(
-            "data-masking: policy loaded with 0 rules; all traffic will pass through unmodified"
+            "pii-tokenization: policy loaded with 0 rules; all traffic will pass through unmodified"
         );
     } else {
         logger::info!(
-            "data-masking: policy loaded with {} rule(s); maskRequestBody={} unmaskResponseBody={} contentTypeMode={:?}",
+            "pii-tokenization: policy loaded with {} rule(s); maskRequestBody={} unmaskResponseBody={} contentTypeMode={:?}",
             cfg.rules.len(),
             cfg.mask_request_body,
             cfg.unmask_response_body,
@@ -113,7 +113,7 @@ async fn request_filter(
 
     if body.len() > cfg.max_body_size_bytes {
         logger::warn!(
-            "data-masking: request body ({} bytes) exceeds maxBodySizeBytes ({}); passing through unmodified",
+            "pii-tokenization: request body ({} bytes) exceeds maxBodySizeBytes ({}); passing through unmodified",
             body.len(),
             cfg.max_body_size_bytes
         );
@@ -128,7 +128,7 @@ async fn request_filter(
     let masked = mask_body(&body, &cfg, &mut vault, req_is_json);
 
     if let Err(e) = body_state.handler().set_body(&masked) {
-        logger::error!("data-masking: set_body failed: {e:?}; passing through");
+        logger::error!("pii-tokenization: set_body failed: {e:?}; passing through");
         return Flow::Continue(RequestState {
             vault: Vault::empty(),
             is_json: req_is_json,
@@ -137,12 +137,12 @@ async fn request_filter(
 
     if vault.truncations > 0 {
         logger::warn!(
-            "data-masking: vault hit maxVaultEntries cap; {} match(es) passed through unmasked",
+            "pii-tokenization: vault hit maxVaultEntries cap; {} match(es) passed through unmasked",
             vault.truncations
         );
     }
 
-    logger::debug!("data-masking: enrolled {} mask(s) into vault", vault.len());
+    logger::debug!("pii-tokenization: enrolled {} mask(s) into vault", vault.len());
 
     Flow::Continue(RequestState {
         vault,
@@ -180,7 +180,7 @@ async fn response_filter(
 
     if body.len() > cfg.max_body_size_bytes {
         logger::warn!(
-            "data-masking: response body ({} bytes) exceeds maxBodySizeBytes ({}); passing through unmodified",
+            "pii-tokenization: response body ({} bytes) exceeds maxBodySizeBytes ({}); passing through unmodified",
             body.len(),
             cfg.max_body_size_bytes
         );
@@ -201,7 +201,7 @@ async fn response_filter(
     }
 
     if let Err(e) = body_state.handler().set_body(&new_body) {
-        logger::error!("data-masking: response set_body failed: {e:?}");
+        logger::error!("pii-tokenization: response set_body failed: {e:?}");
     }
 }
 
@@ -214,14 +214,14 @@ fn mask_body(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault, body_is_json: b
             return out;
         }
         // JSON parse failed; fall back to plaintext.
-        logger::debug!("data-masking: JSON parse failed; falling back to plaintext masking");
+        logger::debug!("pii-tokenization: JSON parse failed; falling back to plaintext masking");
     }
 
     let text = match std::str::from_utf8(body) {
         Ok(s) => s,
         Err(_) => {
             logger::debug!(
-                "data-masking: body is not UTF-8; passing through unmodified"
+                "pii-tokenization: body is not UTF-8; passing through unmodified"
             );
             return body.to_vec();
         }
@@ -248,7 +248,7 @@ fn transform_response(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault, use_js
         if use_json {
             json_walk::mask_json_response(body, cfg, vault).unwrap_or_else(|_| {
                 logger::debug!(
-                    "data-masking: response JSON parse failed; falling back to plaintext masking"
+                    "pii-tokenization: response JSON parse failed; falling back to plaintext masking"
                 );
                 let text = std::str::from_utf8(body).unwrap_or("");
                 matcher::mask_response(text, cfg, vault).into_bytes()
@@ -257,7 +257,7 @@ fn transform_response(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault, use_js
             let text = match std::str::from_utf8(body) {
                 Ok(s) => s,
                 Err(_) => {
-                    logger::debug!("data-masking: response body is not UTF-8; passing through");
+                    logger::debug!("pii-tokenization: response body is not UTF-8; passing through");
                     return body.to_vec();
                 }
             };
@@ -274,7 +274,7 @@ fn transform_response(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault, use_js
     let text = match std::str::from_utf8(&masked) {
         Ok(s) => s,
         Err(_) => {
-            logger::debug!("data-masking: response body is not UTF-8; skipping unmask");
+            logger::debug!("pii-tokenization: response body is not UTF-8; skipping unmask");
             return masked;
         }
     };

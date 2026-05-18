@@ -15,7 +15,7 @@ spec:
             destinationPath: /anything
   policies:
     - policyRef:
-        name: data-masking-policy-v1-0-impl  # overridden by `make run`
+        name: pii-tokenization-policy-v1-0-impl  # overridden by `make run`
         namespace: default
       config:
         maskRequestBody: true

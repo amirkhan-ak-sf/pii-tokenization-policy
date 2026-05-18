@@ -1,5 +1,5 @@
 [package]
-name = "data_masking_policy"
+name = "pii_tokenization_policy"
 version = "1.0.0"
 rust-version = "1.88.0"
 edition = "2021"
@@ -9,8 +9,8 @@ crate-type = ["cdylib", "rlib"]
 
 [package.metadata.anypoint]
 group_id = "f684513f-280e-403a-ac53-80ca62e3de49"
-definition_asset_id = "data-masking-policy"
-implementation_asset_id = "data-masking-policy-wasm"
+definition_asset_id = "pii-tokenization-policy"
+implementation_asset_id = "pii-tokenization-policy-wasm"
 
 [dependencies]
 pdk = "1.8.0"

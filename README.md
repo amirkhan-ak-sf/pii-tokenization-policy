@@ -1,9 +1,9 @@
-# data-masking-policy
+# pii-tokenization-policy
 
 A MuleSoft Flex Gateway / Omni Gateway custom policy that performs
-**bidirectional, format-preserving masking** of sensitive data inside
-HTTP request and response bodies — applied at the gateway, transparent
-to client and upstream alike.
+**bidirectional, format-preserving tokenization** of sensitive data
+inside HTTP request and response bodies — applied at the gateway,
+transparent to client and upstream alike.
 
 ## What it does
 
@@ -55,7 +55,7 @@ After publishing (`make release`), apply it via Anypoint API Manager UI
 or the CLI:
 
 ```bash
-anypoint-cli-v4 api-mgr policy apply <api-instance-id> data-masking-policy \
+anypoint-cli-v4 api-mgr policy apply <api-instance-id> pii-tokenization-policy \
     --policyVersion 1.0.0 \
     --groupId <org-uuid> \
     --configFile ./policy-config.json
@@ -181,7 +181,7 @@ values only:
 
 ```bash
 docker compose -f playground/docker-compose.yaml logs local-flex \
-  | grep -i "data-masking"
+  | grep -i "pii-tokenization"
 ```
 
 To verify the upstream-side masking directly, point a tcpdump or sniffer
