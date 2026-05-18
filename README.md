@@ -213,7 +213,13 @@ for operator documentation. Quick overview:
   syntax. The whole match is masked.
 - **`static`**: provide a list of literal values. Compiled into a single
   Aho-Corasick automaton at policy load, so a list of thousands of
-  values still scans in O(n) per request.
+  values still scans in O(n) per request. Two ways to supply entries:
+  - `values: ["Amir Khan", "Lena Vogelsang", ...]` — one entry per item
+    in a JSON array. Convenient for short lists or programmatic config.
+  - `valuesText: "..."` — bulk-input field for pasting many entries at
+    once. Accepts a JSON array (`[\"Amir\",\"Lena\"]`),
+    one-value-per-line, or comma-separated. If both `values` and
+    `valuesText` are set, the lists are merged and de-duplicated.
 
 ### Scope
 

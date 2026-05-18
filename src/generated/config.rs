@@ -15,6 +15,8 @@ pub struct MaskingRules0Config {
     pub scope: Option<String>,
     #[serde(alias = "values")]
     pub values: Option<Vec<String>>,
+    #[serde(alias = "valuesText")]
+    pub values_text: Option<String>,
 }
 #[derive(Deserialize, Clone, Debug)]
 pub struct Config {

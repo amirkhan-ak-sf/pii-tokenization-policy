@@ -173,6 +173,7 @@ mod tests {
             custom_regex: None,
             data_type: Some("number".into()),
             values: vec![],
+            values_text: None,
             scope: None,
         }]);
         let _ = ContentTypeMode::Auto; // silence unused
@@ -191,6 +192,7 @@ mod tests {
             custom_regex: None,
             data_type: Some("name".into()),
             values: vec!["Amir Khan".into(), "Johan Koeppel".into()],
+            values_text: None,
             scope: None,
         }]);
         let mut v = vault();
@@ -212,6 +214,7 @@ mod tests {
                 custom_regex: None,
                 data_type: None,
                 values: vec!["abcdef".into()],
+                values_text: None,
                 scope: None,
             },
             RawRule {
@@ -221,6 +224,7 @@ mod tests {
                 custom_regex: None,
                 data_type: None,
                 values: vec!["cd".into()],
+                values_text: None,
                 scope: None,
             },
         ]);
@@ -240,6 +244,7 @@ mod tests {
             custom_regex: None,
             data_type: Some("number".into()),
             values: vec![],
+            values_text: None,
             scope: None,
         }]);
         let mut v = vault();
@@ -259,6 +264,7 @@ mod tests {
             custom_regex: None,
             data_type: Some("number".into()),
             values: vec![],
+            values_text: None,
             scope: Some("request".into()),
         }]);
         let mut v = vault();

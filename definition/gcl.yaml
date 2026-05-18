@@ -262,6 +262,23 @@ spec:
               Compiled into a single Aho-Corasick automaton at policy
               load, so thousands of entries scan in O(n + matches) per
               request.
+          valuesText:
+            type: string
+            default: ""
+            description: |
+              Bulk-input alternative to `values`. Paste many literal
+              entries here as one of:
+                - JSON array, e.g. ["Amir Khan","Lena Vogelsang", ...]
+                - one value per line
+                - comma-separated values on a single line
+              Whitespace around each entry is trimmed; empty entries are
+              skipped. If both `values` and `valuesText` are set the two
+              lists are merged and de-duplicated (first occurrence wins).
+              Only meaningful when `ruleType=static`.
+              Note: Anypoint's policy-config form does not currently
+              render string fields as multi-line textareas, so this may
+              appear as a single-line input. Pasting a multi-line block
+              still works.
           scope:
             type: string
             enum:

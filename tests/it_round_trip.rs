@@ -123,6 +123,52 @@ fn ssn_round_trip_with_json_aware() {
 }
 
 #[test]
+fn static_rule_via_values_text_bulk_paste() {
+    // End-to-end check of the bulk-input (`valuesText`) entry point:
+    // an operator pastes a JSON-array block into a single string field
+    // and the policy still masks the listed names on the request.
+    let cfg = serde_json::json!({
+        "maskRequestBody": true,
+        "unmaskResponseBody": true,
+        "contentTypeMode": "auto",
+        "maskingRules": [
+            {
+                "name": "premier-customers",
+                "ruleType": "static",
+                "dataType": "name",
+                "valuesText": "[\"Heinz Kohlweg\", \"Katrin Böhm\", \"Amir Khan\", \"Lena Vogelsang\"]",
+                "scope": "both"
+            }
+        ]
+    });
+    let (mut tester, captured, _resp) = build_tester(cfg);
+    let body = serde_json::json!({
+        "prompt": "Customer Heinz Kohlweg and Katrin Böhm flagged Amir Khan as VIP."
+    })
+    .to_string();
+    let req = UnitHttpRequest::post()
+        .with_path("/anything")
+        .with_header("content-type", "application/json")
+        .with_body(body.into_bytes());
+    let resp = tester.request(req);
+    let upstream = captured.borrow().clone().expect("upstream captured a body");
+    let upstream_text = std::str::from_utf8(&upstream).unwrap();
+    for name in ["Heinz Kohlweg", "Katrin Böhm", "Amir Khan"] {
+        assert!(
+            !upstream_text.contains(name),
+            "upstream still saw '{name}' from valuesText: {upstream_text}"
+        );
+    }
+    let client_body = std::str::from_utf8(resp.body()).unwrap();
+    for name in ["Heinz Kohlweg", "Katrin Böhm", "Amir Khan"] {
+        assert!(
+            client_body.contains(name),
+            "client did not see '{name}' restored: {client_body}"
+        );
+    }
+}
+
+#[test]
 fn static_list_with_thousands_of_entries() {
     let mut names: Vec<serde_json::Value> = (0..10_000)
         .map(|i| serde_json::Value::String(format!("Customer{i:05}")))

@@ -213,9 +213,18 @@ masked values. Original data never reappears.
   `GovernmentId/GermanSvnr`, `Financial/Iban`, `Network/Ipv4`.
 - **`customRegex`** — supply your own regex string in `customRegex`.
   Standard Rust regex syntax. The full match is masked.
-- **`static`** — supply a list of literal values in `values`. Compiled
-  into a single Aho-Corasick automaton at policy load, so a list of
-  thousands of names scans in O(n) per request.
+- **`static`** — supply a list of literal values. Compiled into a
+  single Aho-Corasick automaton at policy load, so a list of thousands
+  of names scans in O(n) per request. Two ways to supply entries:
+  - `values: ["Amir Khan", "Lena Vogelsang", ...]` — one entry per
+    item in a JSON array. Use this for short lists or programmatic
+    config.
+  - `valuesText: "..."` — bulk-input alternative for pasting many
+    entries at once into a single text field. Accepts a JSON array
+    (`["Amir","Lena"]`), one-value-per-line, or comma-separated.
+    Whitespace around each entry is trimmed; empty entries are
+    skipped. If both `values` and `valuesText` are set, the lists are
+    merged and de-duplicated (first occurrence wins for ordering).
 
 ### Scope
 

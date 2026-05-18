@@ -53,6 +53,7 @@ pub struct RawRule {
     pub custom_regex: Option<String>,
     pub data_type: Option<String>,
     pub values: Vec<String>,
+    pub values_text: Option<String>,
     pub scope: Option<String>,
 }
 
@@ -239,13 +240,14 @@ fn compile_rule(r: RawRule) -> Result<CompiledRule, ConfigError> {
             })
         }
         "static" => {
-            if r.values.is_empty() {
+            let merged = merge_static_values(&r.values, r.values_text.as_deref());
+            if merged.is_empty() {
                 return Err(ConfigError::EmptyStaticValues(r.name.clone()));
             }
             let ac = AhoCorasickBuilder::new()
                 .match_kind(MatchKind::LeftmostLongest)
                 .ascii_case_insensitive(false)
-                .build(&r.values)
+                .build(&merged)
                 .map_err(|e| ConfigError::BadStaticAutomaton(r.name.clone(), e.to_string()))?;
             Ok(CompiledRule::Static {
                 name: r.name,
@@ -256,6 +258,67 @@ fn compile_rule(r: RawRule) -> Result<CompiledRule, ConfigError> {
         }
         other => Err(ConfigError::BadRuleType(r.name.clone(), other.into())),
     }
+}
+
+/// Merge the operator-supplied `values` array with the bulk-input
+/// `valuesText` field, parsing the latter and de-duplicating the
+/// combined list (first occurrence wins for ordering).
+///
+/// Format detection on `text`:
+///   1. JSON array — if the trimmed input starts with `[`, try
+///      `serde_json::from_str::<Vec<String>>`. On success use it.
+///   2. Newline-separated — split on `\n`, trim, drop empties.
+///   3. Comma-separated — if newline parse produces a single entry that
+///      still contains a comma, split that entry on `,` instead.
+///
+/// Order matters: JSON sniffing runs first because a JSON array
+/// contains commas and newlines that would corrupt later parses.
+/// Newline beats comma so a value like `Smith, Jr.` survives intact
+/// when one-per-line is the intent.
+fn merge_static_values(values: &[String], text: Option<&str>) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut out: Vec<String> = Vec::with_capacity(values.len());
+    let mut seen: HashSet<String> = HashSet::new();
+    for v in values {
+        if seen.insert(v.clone()) {
+            out.push(v.clone());
+        }
+    }
+
+    let Some(text) = text else { return out };
+    if text.trim().is_empty() {
+        return out;
+    }
+
+    let parsed = parse_values_text(text);
+    for v in parsed {
+        if seen.insert(v.clone()) {
+            out.push(v);
+        }
+    }
+    out
+}
+
+fn parse_values_text(text: &str) -> Vec<String> {
+    if text.trim_start().starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(text) {
+            return arr.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        }
+    }
+    let lines: Vec<String> = text
+        .split('\n')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if lines.len() == 1 && lines[0].contains(',') {
+        return lines[0]
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    lines
 }
 
 /// Bridge codegen `Config` -> `RawConfig`. Lives in this module so the
@@ -280,6 +343,7 @@ impl From<&crate::generated::config::Config> for RawConfig {
                     custom_regex: r.custom_regex.clone(),
                     data_type: r.data_type.clone(),
                     values: r.values.clone().unwrap_or_default(),
+                    values_text: r.values_text.clone(),
                     scope: r.scope.clone(),
                 })
                 .collect(),
@@ -310,6 +374,7 @@ mod tests {
             custom_regex: None,
             data_type: None,
             values: values.iter().map(|s| (*s).to_string()).collect(),
+            values_text: None,
             scope: None,
         }
     }
@@ -322,6 +387,7 @@ mod tests {
             custom_regex: None,
             data_type: None,
             values: vec![],
+            values_text: None,
             scope: None,
         }
     }
@@ -334,6 +400,7 @@ mod tests {
             custom_regex: Some(regex.into()),
             data_type: None,
             values: vec![],
+            values_text: None,
             scope: None,
         }
     }
@@ -409,6 +476,7 @@ mod tests {
             custom_regex: None,
             data_type: None,
             values: names,
+            values_text: None,
             scope: None,
         };
         let cfg = PolicyConfig::from_raw(raw(vec![rule])).unwrap();
@@ -424,5 +492,75 @@ mod tests {
         assert!(cfg.rules[0].scope().applies_to_request());
         assert!(!cfg.rules[0].scope().applies_to_response());
         assert!(!cfg.rules[0].scope().enrolls_into_vault());
+    }
+
+    #[test]
+    fn valuestext_json_array_form() {
+        let mut r = rule_static("names", &[]);
+        r.values_text =
+            Some(r#"["Heinz Kohlweg", "Katrin Böhm", "Amir Khan"]"#.into());
+        let cfg = PolicyConfig::from_raw(raw(vec![r])).unwrap();
+        assert_eq!(cfg.rules.len(), 1);
+    }
+
+    #[test]
+    fn valuestext_newline_form() {
+        let mut r = rule_static("names", &[]);
+        r.values_text = Some(
+            "  Heinz Kohlweg  \n\nKatrin Böhm\nAmir Khan\n   ".into(),
+        );
+        let parsed = parse_values_text(r.values_text.as_deref().unwrap());
+        assert_eq!(parsed, vec!["Heinz Kohlweg", "Katrin Böhm", "Amir Khan"]);
+        let cfg = PolicyConfig::from_raw(raw(vec![r])).unwrap();
+        assert_eq!(cfg.rules.len(), 1);
+    }
+
+    #[test]
+    fn valuestext_comma_form() {
+        let parsed = parse_values_text("Heinz Kohlweg, Katrin Böhm , Amir Khan");
+        assert_eq!(parsed, vec!["Heinz Kohlweg", "Katrin Böhm", "Amir Khan"]);
+    }
+
+    #[test]
+    fn valuestext_merges_with_values_dedup() {
+        let merged = merge_static_values(
+            &["Amir Khan".into(), "Heinz Kohlweg".into()],
+            Some("Amir Khan\nKatrin Böhm"),
+        );
+        assert_eq!(
+            merged,
+            vec!["Amir Khan", "Heinz Kohlweg", "Katrin Böhm"],
+            "first occurrence wins; bulk-supplied duplicate is dropped"
+        );
+    }
+
+    #[test]
+    fn valuestext_empty_falls_back_to_values() {
+        let merged = merge_static_values(&["Amir Khan".into()], Some("   \n\n  "));
+        assert_eq!(merged, vec!["Amir Khan"]);
+    }
+
+    #[test]
+    fn valuestext_alone_compiles_with_empty_values() {
+        let mut r = rule_static("names", &[]);
+        r.values_text = Some("Amir Khan\nHeinz Kohlweg".into());
+        let cfg = PolicyConfig::from_raw(raw(vec![r])).unwrap();
+        assert_eq!(cfg.rules.len(), 1);
+    }
+
+    #[test]
+    fn bad_json_in_valuestext_falls_through_to_newline() {
+        // `[oops` looks like JSON but won't parse — should fall back to
+        // newline form, treating the whole input as a single value.
+        let parsed = parse_values_text("[oops");
+        assert_eq!(parsed, vec!["[oops"]);
+    }
+
+    #[test]
+    fn empty_static_when_both_values_and_text_empty() {
+        let mut r = rule_static("names", &[]);
+        r.values_text = Some("".into());
+        let err = PolicyConfig::from_raw(raw(vec![r])).unwrap_err();
+        assert!(matches!(err, ConfigError::EmptyStaticValues(..)));
     }
 }
