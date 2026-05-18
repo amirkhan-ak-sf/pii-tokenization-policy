@@ -219,6 +219,45 @@ fn unmask_response_body_off_means_client_sees_mask() {
 }
 
 #[test]
+fn mask_preserves_request_body_length_with_whitespace() {
+    // Regression: pretty-printed JSON request bodies (or just bodies
+    // with spaces around `:` / `,`) used to shrink in the masker
+    // because we round-tripped through serde_json::Value -> to_vec,
+    // which collapses whitespace. The gateway forwards the inbound
+    // Content-Length header without rewriting it, so a shorter masked
+    // body caused upstream resets / 503s.
+    let cfg = serde_json::json!({
+        "maskRequestBody": true,
+        "unmaskResponseBody": false,
+        "contentTypeMode": "auto",
+        "maskingRules": [
+            {"name":"ssn","ruleType":"builtin","builtinPattern":"GovernmentId/UsSsn","dataType":"number","scope":"both"},
+            {"name":"names","ruleType":"static","dataType":"name","values":["Amir Khan"],"scope":"both"}
+        ]
+    });
+    let (mut tester, captured, _resp) = build_tester(cfg);
+    let body = r#"{"prompt" : "Amir Khan with 123-45-6789 needs an update to the existing contract"}"#;
+    let req = UnitHttpRequest::post()
+        .with_path("/anything")
+        .with_header("content-type", "application/json")
+        .with_body(body.as_bytes().to_vec());
+    let _ = tester.request(req);
+    let upstream = captured.borrow().clone().unwrap();
+    assert_eq!(
+        upstream.len(),
+        body.len(),
+        "masked request body length must match original; got {} vs {}",
+        upstream.len(),
+        body.len()
+    );
+    let upstream_text = std::str::from_utf8(&upstream).unwrap();
+    assert!(!upstream_text.contains("Amir Khan"));
+    assert!(!upstream_text.contains("123-45-6789"));
+    // Whitespace around `:` must be preserved.
+    assert!(upstream_text.contains("\"prompt\" : "), "got {upstream_text}");
+}
+
+#[test]
 fn unmask_preserves_response_body_length() {
     // Regression: the response-phase unmask must not change the body's
     // byte length. The gateway forwards the upstream's Content-Length
