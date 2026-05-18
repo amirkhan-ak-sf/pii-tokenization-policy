@@ -1,90 +1,253 @@
-//! JSON-aware mask/unmask. Parses with `serde_json::Value`, walks
-//! recursively, and rewrites only string and number leaf values. Object
-//! keys, array indices, and structural punctuation are never touched, so
-//! a customer's name appearing as the value of the `"name"` field is
-//! masked but a key called `"name"` survives intact.
+//! JSON-aware mask. Walks the body once with a tiny tokenizer to find
+//! the byte ranges of every string and number leaf value (skipping
+//! object keys), then rewrites those ranges in-place by running the
+//! masker on the original bytes. The output has the same length as the
+//! input — critical because the gateway forwards the upstream's
+//! `Content-Length` header without rewriting it, and any size drift
+//! (e.g. from re-serializing a pretty-printed body via `serde_json`)
+//! causes downstream resets / hangs.
 //!
-//! Numbers are stringified for masking, then we try to reparse the
-//! masked string back to a number. If reparsing fails (which can happen
-//! at the edges of i64/u64/f64 representable space), we fall back to a
-//! string and let the upstream handle the type drift.
-
-use serde_json::Value;
+//! The masker is format-preserving (`a..z` -> `a..z`, `0..9` -> `0..9`,
+//! everything else passes through unchanged), so the masked range has
+//! exactly the same byte length as the original range.
 
 use crate::config::PolicyConfig;
 use crate::mask::Vault;
 use crate::matcher::{mask_request, mask_response};
 
 pub fn mask_json_request(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault) -> Result<Vec<u8>, ()> {
-    let mut value: Value = serde_json::from_slice(body).map_err(|_| ())?;
-    walk_mut(&mut value, &mut |s| {
-        let masked = mask_request(s, cfg, vault);
-        if masked == *s { None } else { Some(masked) }
-    });
-    serde_json::to_vec(&value).map_err(|_| ())
+    transform_value_ranges(body, |slice| mask_request(slice, cfg, vault))
 }
 
 pub fn mask_json_response(body: &[u8], cfg: &PolicyConfig, vault: &mut Vault) -> Result<Vec<u8>, ()> {
-    let mut value: Value = serde_json::from_slice(body).map_err(|_| ())?;
-    walk_mut(&mut value, &mut |s| {
-        let masked = mask_response(s, cfg, vault);
-        if masked == *s { None } else { Some(masked) }
-    });
-    serde_json::to_vec(&value).map_err(|_| ())
+    transform_value_ranges(body, |slice| mask_response(slice, cfg, vault))
 }
 
-/// Walk a `serde_json::Value` and apply `f` to every string and number
-/// leaf. `f` returns `Some(replacement)` to substitute, `None` to leave
-/// the leaf alone. Numbers are stringified for `f`'s benefit and the
-/// replacement is reparsed back to a number when possible (else stored
-/// as a string, which is the right behaviour when masking a digit-only
-/// SSN-as-number into another digit-only run that may exceed i64).
-fn walk_mut<F>(value: &mut Value, f: &mut F)
+/// Find every JSON value-position byte range and rewrite it through
+/// `transform`. Returns `Err(())` if the body is not valid JSON — the
+/// caller falls back to plaintext masking on the raw bytes.
+///
+/// The algorithm: scan the bytes. Track whether the next string we
+/// encounter is a key (just after `{` or `,` inside an object) or a
+/// value. Capture the byte range of every string/number leaf at value
+/// positions; ignore strings at key positions. Rewrite the captured
+/// ranges by running `transform` on the original UTF-8 substring.
+///
+/// Returns the rewritten body. The output length equals the input
+/// length, because the masker is format-preserving over ASCII alphanum
+/// and passes everything else through unchanged.
+fn transform_value_ranges<F>(body: &[u8], mut transform: F) -> Result<Vec<u8>, ()>
 where
-    F: FnMut(&str) -> Option<String>,
+    F: FnMut(&str) -> String,
 {
-    match value {
-        Value::String(s) => {
-            if let Some(replacement) = f(s) {
-                *s = replacement;
-            }
+    // Validate JSON shape with serde_json — cheap and authoritative.
+    // We don't use the parsed value; we just need to know it's parseable.
+    let _: serde_json::Value = serde_json::from_slice(body).map_err(|_| ())?;
+
+    let ranges = collect_value_ranges(body)?;
+    if ranges.is_empty() {
+        return Ok(body.to_vec());
+    }
+
+    let mut out = Vec::with_capacity(body.len());
+    let mut last = 0usize;
+    for (start, end) in ranges {
+        if start < last || end > body.len() || start > end {
+            // Defensive: bail to plaintext if our scanner produced bad ranges.
+            return Err(());
         }
-        Value::Number(n) => {
-            let s = n.to_string();
-            if let Some(replacement) = f(&s) {
-                if replacement == s {
-                    return;
+        out.extend_from_slice(&body[last..start]);
+        let original = match std::str::from_utf8(&body[start..end]) {
+            Ok(s) => s,
+            Err(_) => {
+                out.extend_from_slice(&body[start..end]);
+                last = end;
+                continue;
+            }
+        };
+        let replaced = transform(original);
+        if replaced.len() == end - start {
+            out.extend_from_slice(replaced.as_bytes());
+        } else {
+            // Length-preserving guarantee broken (shouldn't happen with our
+            // masker, but guard against pathological data types). Pass the
+            // original through to keep total body length stable.
+            out.extend_from_slice(&body[start..end]);
+        }
+        last = end;
+    }
+    out.extend_from_slice(&body[last..]);
+    Ok(out)
+}
+
+/// Single-pass scan over the JSON bytes. Returns sorted, non-overlapping
+/// (start, end) byte ranges for every string/number value-position leaf.
+/// Keys (strings immediately followed by `:`) are excluded.
+fn collect_value_ranges(body: &[u8]) -> Result<Vec<(usize, usize)>, ()> {
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut stack: Vec<Ctx> = vec![Ctx::TopLevel];
+    let mut i = 0usize;
+
+    while i < body.len() {
+        let b = body[i];
+        if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+            i += 1;
+            continue;
+        }
+
+        let ctx = *stack.last().ok_or(())?;
+        match b {
+            b'{' => {
+                stack.push(Ctx::ObjectExpectingKeyOrEnd);
+                i += 1;
+            }
+            b'}' => {
+                if !matches!(ctx, Ctx::ObjectExpectingKeyOrEnd | Ctx::ObjectExpectingValue) {
+                    return Err(());
                 }
-                *value = parse_number_or_string(&replacement);
+                stack.pop();
+                advance_after_value(&mut stack);
+                i += 1;
             }
-        }
-        Value::Array(items) => {
-            for item in items {
-                walk_mut(item, f);
+            b'[' => {
+                stack.push(Ctx::ArrayExpectingValueOrEnd);
+                i += 1;
             }
-        }
-        Value::Object(map) => {
-            for (_key, v) in map {
-                walk_mut(v, f);
+            b']' => {
+                if !matches!(ctx, Ctx::ArrayExpectingValueOrEnd) {
+                    return Err(());
+                }
+                stack.pop();
+                advance_after_value(&mut stack);
+                i += 1;
             }
+            b',' => {
+                match ctx {
+                    Ctx::ObjectExpectingKeyOrEnd | Ctx::ArrayExpectingValueOrEnd => {}
+                    _ => return Err(()),
+                }
+                i += 1;
+            }
+            b':' => {
+                // Transition from key to value position.
+                if let Some(top) = stack.last_mut() {
+                    if matches!(*top, Ctx::ObjectExpectingKeyOrEnd) {
+                        *top = Ctx::ObjectExpectingValue;
+                    } else {
+                        return Err(());
+                    }
+                }
+                i += 1;
+            }
+            b'"' => {
+                let (content_start, end_after_quote) = scan_string(body, i)?;
+                let content_end = end_after_quote - 1;
+                let is_key = matches!(ctx, Ctx::ObjectExpectingKeyOrEnd);
+                if !is_key {
+                    ranges.push((content_start, content_end));
+                    advance_after_value(&mut stack);
+                }
+                i = end_after_quote;
+            }
+            b't' | b'f' | b'n' => {
+                // true / false / null: skip the literal, no range captured.
+                let lit_end = scan_literal(body, i)?;
+                advance_after_value(&mut stack);
+                i = lit_end;
+            }
+            _ if b == b'-' || b.is_ascii_digit() => {
+                let num_end = scan_number(body, i)?;
+                ranges.push((i, num_end));
+                advance_after_value(&mut stack);
+                i = num_end;
+            }
+            _ => return Err(()),
         }
-        Value::Bool(_) | Value::Null => {}
+    }
+
+    // Sanity: ranges should already be sorted by construction, but enforce.
+    ranges.sort_by_key(|r| r.0);
+    Ok(ranges)
+}
+
+/// After consuming a value, the surrounding container goes back to its
+/// "expecting separator-or-end" state. (The TopLevel state stays.)
+fn advance_after_value(stack: &mut [Ctx]) {
+    if let Some(top) = stack.last_mut() {
+        match *top {
+            Ctx::ObjectExpectingValue => *top = Ctx::ObjectExpectingKeyOrEnd,
+            // Array is already in "value-or-end" mode.
+            Ctx::ArrayExpectingValueOrEnd => {}
+            Ctx::TopLevel => {}
+            Ctx::ObjectExpectingKeyOrEnd => {}
+        }
     }
 }
 
-fn parse_number_or_string(s: &str) -> Value {
-    if let Ok(n) = s.parse::<i64>() {
-        return Value::from(n);
-    }
-    if let Ok(n) = s.parse::<u64>() {
-        return Value::from(n);
-    }
-    if let Ok(n) = s.parse::<f64>() {
-        if let Some(num) = serde_json::Number::from_f64(n) {
-            return Value::Number(num);
+#[derive(Clone, Copy)]
+enum Ctx {
+    TopLevel,
+    ObjectExpectingKeyOrEnd,
+    ObjectExpectingValue,
+    ArrayExpectingValueOrEnd,
+}
+
+/// `body[i] == '"'`. Returns `(content_start, end_after_closing_quote)`.
+/// Handles backslash-escapes; does NOT decode them, so the returned
+/// content range is the raw on-wire bytes between the quotes.
+fn scan_string(body: &[u8], i: usize) -> Result<(usize, usize), ()> {
+    debug_assert_eq!(body[i], b'"');
+    let content_start = i + 1;
+    let mut j = content_start;
+    while j < body.len() {
+        match body[j] {
+            b'\\' => {
+                // Skip escape; advance two bytes (or six for \uXXXX, but the
+                // next iteration handles the trailing chars naturally).
+                j = j.saturating_add(2);
+            }
+            b'"' => return Ok((content_start, j + 1)),
+            _ => j += 1,
         }
     }
-    Value::String(s.to_string())
+    Err(())
+}
+
+/// Skip a JSON literal (`true`, `false`, or `null`) starting at `i`.
+fn scan_literal(body: &[u8], i: usize) -> Result<usize, ()> {
+    let rest = &body[i..];
+    if rest.starts_with(b"true") { Ok(i + 4) }
+    else if rest.starts_with(b"false") { Ok(i + 5) }
+    else if rest.starts_with(b"null") { Ok(i + 4) }
+    else { Err(()) }
+}
+
+/// Skip a JSON number starting at `i`, return the index just past the
+/// last digit/sign/exponent character.
+fn scan_number(body: &[u8], i: usize) -> Result<usize, ()> {
+    let mut j = i;
+    if j < body.len() && body[j] == b'-' {
+        j += 1;
+    }
+    while j < body.len() && body[j].is_ascii_digit() {
+        j += 1;
+    }
+    if j < body.len() && body[j] == b'.' {
+        j += 1;
+        while j < body.len() && body[j].is_ascii_digit() {
+            j += 1;
+        }
+    }
+    if j < body.len() && (body[j] == b'e' || body[j] == b'E') {
+        j += 1;
+        if j < body.len() && (body[j] == b'+' || body[j] == b'-') {
+            j += 1;
+        }
+        while j < body.len() && body[j].is_ascii_digit() {
+            j += 1;
+        }
+    }
+    if j == i { Err(()) } else { Ok(j) }
 }
 
 #[cfg(test)]
